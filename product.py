@@ -1,164 +1,169 @@
-import math
-from pysat.solvers import Glucose3
-import time
 
-start_time = time.time()
-new_variables_count = 0
+import math
+import time
+from pysat.solvers import Glucose3
+
 
 def generate_variables(n):
-    return [[i * n + j + 1 for j in range(n)] for i in range(n)]
-
-
-def binomial_AMO(clauses, variables):
-    for i in range(0, len(variables)):
-        for j in range(i + 1, len(variables)):
-            clauses.append([-variables[i], -variables[j]])
-    return clauses
-
-def generate_matrix(start, variables_length):
-    p = math.ceil(math.sqrt(variables_length))
-    q = math.ceil(n / p)
     return [
-        [i for i in range(start, start + p)],
-        [j for j in range(start + p, start + p + q)]
+        [i * n + j + 1 for j in range(n)]
+        for i in range(n)
     ]
 
 
-def generate_binary_combinations(n):
-    binary_combinations = []
-    for i in range(1 << n):
-        binary_combinations.append(format(i, '0' + str(n) + 'b'))
-    return binary_combinations
-
-
-def binary_encoding(clauses, target, new_variables):
-    for i in range(len(new_variables)):
-        clauses.append([-target, new_variables[i]])
-
-def generate_new_variables(end, length):
-    return [i for i in range(end + 1, end + math.ceil(math.log(length, 2)) + 1)]
-
-def binary_AMO(clauses, variables):
-    global new_variables_count
-    temp_new_variables = generate_new_variables(n ** 2 + new_variables_count, len(variables))
-    new_variables_count += len(temp_new_variables)
-    binary_combinations = generate_binary_combinations(len(temp_new_variables))
-
+def pairwise_amo(clauses, variables):
     for i in range(len(variables)):
-        combination = binary_combinations[i]
-        temp_clause = []
-        for j in range(len(combination) - 1, -1, -1):
-            index = len(combination) - j - 1
-            temp_clause.append({True: temp_new_variables[index], False: -temp_new_variables[index]} [int(combination[j]) == 1])
+        for j in range(i + 1, len(variables)):
+            clauses.append([-variables[i], -variables[j]])
 
-        binary_encoding(clauses, variables[i], temp_clause)
 
-def at_most_one(clauses, variables):
-    global new_variables_count
-    matrix = generate_matrix(n ** 2 + new_variables_count + 1, len(variables))
-    row = matrix[0]
-    col = matrix[1]
-    new_variables_count += len(row) + len(col)
 
-    if(len(variables) > 10):
-        binary_AMO(clauses, row)
-        binary_AMO(clauses, col)
-    else:
-        binomial_AMO(clauses, row)
-        binomial_AMO(clauses, col)
+def product_amo(clauses, variables, next_var):
+    m = len(variables)
 
-    x = 0
-    for i in range(len(row)):
-        for j in range(len(col)):
-            clauses.append([-variables[x], row[i]])
-            clauses.append([-variables[x], col[j]])
-            x += 1
-            if x == len(variables): break
-        if x == len(variables): break
+    if m <= 1:
+        return next_var
 
-def exactly_one(clauses, variables):
-    clauses.append(variables)
-    at_most_one(clauses, variables)
+    if m <= 4:
+        pairwise_amo(clauses, variables)
+        return next_var
+
+    p = math.ceil(math.sqrt(m))
+    q = math.ceil(m / p)
+
+    row_vars = list(range(next_var, next_var + p))
+    next_var += p
+
+    col_vars = list(range(next_var, next_var + q))
+    next_var += q
+
+    groups_row = [[] for _ in range(p)]
+    groups_col = [[] for _ in range(q)]
+
+    for k, var in enumerate(variables):
+        r = k // q
+        c = k % q
+
+        groups_row[r].append(var)
+        groups_col[c].append(var)
+
+        clauses.append([-var, row_vars[r]])
+        clauses.append([-var, col_vars[c]])
+
+    for r in range(p):
+        clauses.append(
+            [-row_vars[r]] + groups_row[r]
+        )
+
+    for c in range(q):
+        clauses.append(
+            [-col_vars[c]] + groups_col[c]
+        )
+
+    next_var = product_amo(clauses, row_vars, next_var)
+    next_var = product_amo(clauses, col_vars, next_var)
+
+    return next_var
+
+
+def exactly_one(clauses, variables, next_var):
+    """Exactly One = At Least One + At Most One."""
+    if not variables:
+        clauses.append([])
+        return next_var
+
+    clauses.append(list(variables))
+
+    next_var = product_amo(clauses, variables, next_var)
+
+    return next_var
+
+
 
 def generate_clauses(n, variables):
     clauses = []
+    next_var = n * n + 1
 
-    # Exactly one queen in each row
-    for row in range(n):
-        exactly_one(clauses, variables[row])
+    for i in range(n):
+        next_var = exactly_one(
+            clauses, variables[i], next_var
+        )
 
-    # Exactly one queen in each column
-    for col in range(n):
-        exactly_one(clauses, [variables[row][col] for row in range(n)])
+    for j in range(n):
+        column = [variables[i][j] for i in range(n)]
+        next_var = exactly_one(
+            clauses, column, next_var
+        )
 
-    # At most one queen in each diagonal
-    for i in range(1, n):
-        diagonal = []
-        row = i
-        col = 0
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, diagonal)
+    descending_diagonals = {}
+    ascending_diagonals = {}
 
-    for j in range(1, n - 1):
-        diagonal = []
-        row = n - 1
-        col = j
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, diagonal)
+    for i in range(n):
+        for j in range(n):
+            var = variables[i][j]
 
-    for i in range(n - 1):
-        diagonal = []
-        row = i
-        col = 0
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, diagonal)
+            descending_diagonals.setdefault(i - j, []).append(var)
+            ascending_diagonals.setdefault(i + j, []).append(var)
 
-    for j in range(1, n - 1):
-        diagonal = []
-        row = 0
-        col = j
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, diagonal)
+    for diagonal in descending_diagonals.values():
+        if len(diagonal) > 1:
+            next_var = product_amo(clauses, diagonal, next_var)
 
-    return clauses
+    for diagonal in ascending_diagonals.values():
+        if len(diagonal) > 1:
+            next_var = product_amo(clauses, diagonal, next_var)
+
+    return clauses, next_var - 1
+
 
 
 def solve_n_queens(n):
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
     variables = generate_variables(n)
-    clauses = generate_clauses(n, variables)
+    clauses, num_vars = generate_clauses(n, variables)
 
     solver = Glucose3()
-    for clause in clauses:
-        solver.add_clause(clause)
 
-    if solver.solve():
+    try:
+        for clause in clauses:
+            solver.add_clause(clause)
+
+        if not solver.solve():
+            return None
+
         model = solver.get_model()
-        return [[int(model[i * n + j] > 0) for j in range(n)] for i in range(n)]
-    else:
-        return None
+
+        true_vars = {
+            literal for literal in model
+            if literal > 0
+        }
+
+        board = [
+            [
+                int(variables[i][j] in true_vars)
+                for j in range(n)
+            ]
+            for i in range(n)
+        ]
+
+        return board
+
+    finally:
+        solver.delete()
 
 
-def print_solution(solution):
+if __name__ == "__main__":
+    n = int(input("Nhap N: "))
+    start = time.perf_counter()
+    solution = solve_n_queens(n)
+    elapsed = time.perf_counter() - start
+
     if solution is None:
-        print("No solution found.")
+            print("No solution found.")
     else:
         for row in solution:
             print(" ".join("Q" if cell else "." for cell in row))
 
-
-n = 128
-solution = solve_n_queens(n)
-print_solution(solution)
-print("Run time:  %s seconds" % (time.time() - start_time))
+    print(f"Thời gian tổng: {elapsed:.6f} giây")

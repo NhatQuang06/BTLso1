@@ -1,116 +1,125 @@
-from pysat.solvers import Glucose3
-import math
 
+import math
+from pysat.solvers import Glucose3
 
 def generate_variables(n):
-    return [[i * n + j + 1 for j in range(n)] for i in range(n)]
+    return [
+        [i * n + j + 1 for j in range(n)]
+        for i in range(n)
+    ]
 
 
-def binary_encoding(clauses, target, new_variables):
-    for i in range(len(new_variables)):
-        clauses.append([-target, new_variables[i]])
+def generate_new_variables(next_var, length):
+    if length <= 1:
+        return [], next_var
+
+    num_aux = math.ceil(math.log2(length))
+    aux_vars = list(range(next_var, next_var + num_aux))
+
+    return aux_vars, next_var + num_aux
 
 
-def generate_binary_combinations(n):
-    binary_combinations = []
-    for i in range(1 << n):
-        binary_combinations.append(format(i, '0' + str(n) + 'b'))
-    return binary_combinations
+def binary_encoding(clauses, target, aux_vars, index):
+    for bit_index, aux in enumerate(aux_vars):
+        bit = (index >> bit_index) & 1
 
-def generate_new_variables(end, length):
-    return [i for i in range(end + 1, end + math.ceil(math.log(length, 2)) + 1)]
-
-
-def at_most_one(clauses, new_variables, variables):
-    temp_new_variables = generate_new_variables(n ** 2 + len(new_variables), len(variables))
-    new_variables += temp_new_variables
-    binary_combinations = generate_binary_combinations(len(temp_new_variables))
-
-    for i in range(len(variables)):
-        combination = binary_combinations[i]
-        temp_clause = []
-        for j in range(len(combination) - 1, -1, -1):
-            index = len(combination) - j - 1
-            temp_clause.append({True: temp_new_variables[index], False: -temp_new_variables[index]} [int(combination[j]) == 1])
-
-        binary_encoding(clauses, variables[i], temp_clause)
+        if bit == 1:
+            clauses.append([-target, aux])
+        else:
+            clauses.append([-target, -aux])
 
 
-def exactly_one(clauses, new_variables, variables):
-    clauses.append(variables)
-    at_most_one(clauses, new_variables, variables)
+def at_most_one(clauses, variables, next_var):
+    if len(variables) <= 1:
+        return next_var
+
+    aux_vars, next_var = generate_new_variables(
+        next_var, len(variables)
+    )
+
+    for index, var in enumerate(variables):
+        binary_encoding(clauses, var, aux_vars, index)
+
+    return next_var
+
+
+def exactly_one(clauses, variables, next_var):
+    """Exactly One = At Least One + At Most One."""
+    clauses.append(list(variables))
+    return at_most_one(clauses, variables, next_var)
 
 
 def generate_clauses(n, variables):
     clauses = []
-    new_variables = []
 
-    # Exactly one queen in each row
+    next_var = n * n + 1
+
     for i in range(n):
-        exactly_one(clauses, new_variables, variables[i])
+        next_var = exactly_one(
+            clauses, variables[i], next_var
+        )
 
-    # Exactly one queen in each column
     for j in range(n):
-        exactly_one(clauses, new_variables, [variables[i][j] for i in range(n)])
+        column = [variables[i][j] for i in range(n)]
+        next_var = exactly_one(
+            clauses, column, next_var
+        )
 
+    diagonals = {}
 
-    # At most one queen in each diagonal
-    for i in range(1, n):
-        diagonal = []
-        row = i
-        col = 0
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, new_variables, diagonal)
+    anti_diagonals = {}
 
-    for j in range(1, n - 1):
-        diagonal = []
-        row = n - 1
-        col = j
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, new_variables, diagonal)
+    for i in range(n):
+        for j in range(n):
+            var = variables[i][j]
 
-    for i in range(n - 1):
-        diagonal = []
-        row = i
-        col = 0
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, new_variables, diagonal)
+            diagonals.setdefault(i - j, []).append(var)
+            anti_diagonals.setdefault(i + j, []).append(var)
 
-    for j in range(1, n - 1):
-        diagonal = []
-        row = 0
-        col = j
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, new_variables, diagonal)
+    for diagonal in diagonals.values():
+        next_var = at_most_one(
+            clauses, diagonal, next_var
+        )
 
-    return clauses
+    for diagonal in anti_diagonals.values():
+        next_var = at_most_one(
+            clauses, diagonal, next_var
+        )
+
+    return clauses, next_var - 1
 
 
 def solve_n_queens(n):
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
     variables = generate_variables(n)
-    clauses = generate_clauses(n, variables)
+    clauses, num_vars = generate_clauses(n, variables)
 
     solver = Glucose3()
-    for clause in clauses:
-        solver.add_clause(clause)
 
-    if solver.solve():
+    try:
+        for clause in clauses:
+            solver.add_clause(clause)
+
+        if not solver.solve():
+            return None
+
         model = solver.get_model()
-        return [[int(model[i * n + j] > 0) for j in range(n)] for i in range(n)]
-    else:
-        return None
+        true_variables = {
+            literal for literal in model if literal > 0
+        }
+
+        return [
+            [
+                int(variables[i][j] in true_variables)
+                for j in range(n)
+            ]
+            for i in range(n)
+        ]
+
+    finally:
+        solver.delete()
 
 
 def print_solution(solution):
@@ -121,7 +130,7 @@ def print_solution(solution):
             print(" ".join("Q" if cell else "." for cell in row))
 
 
-n = 512
-solution = solve_n_queens(n)
-print_solution(solution)
-
+if __name__ == "__main__":
+    n = int(input("Nhap N: "))
+    solution = solve_n_queens(n)
+    print_solution(solution)

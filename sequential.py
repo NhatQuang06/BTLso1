@@ -5,28 +5,47 @@ def generate_variables(n):
     return [[i * n + j + 1 for j in range(n)] for i in range(n)]
 
 
-def generate_variables(n):
-    return [[i * n + j + 1 for j in range(n)] for i in range(n)]
-
-def generate_new_variables(new_variables_count, length):
-    start = n ** 2 + new_variables_count
-    return [i for i in range(start + 1,start + length)]
-
-
-def at_most_one(clauses, variables):
+def generate_new_variables(n, length):
     global new_variables_count
-    new_variables = generate_new_variables(new_variables_count, len(variables))
-    new_variables_count += (len(variables) - 1)
-    clauses.append([-variables[0], new_variables[0]])
-    for i in range(1, len(variables) - 1):
-        clauses.append([-variables[i], new_variables[i]])
-        clauses.append([-new_variables[i - 1], new_variables[i]])
-        clauses.append([-new_variables[i - 1], -variables[i]])
-    clauses.append([-new_variables[len(variables) - 2], -variables[len(variables) - 1]])
 
-def exactly_one(clauses, variables):
+    # Sequential Counter can be skipped for 0 or 1 input
+    if length <= 1:
+        return []
+    
+    start = n * n + new_variables_count
+    count = length - 1
+
+    result = list(range(start + 1, start + count + 1))
+    new_variables_count += count
+
+    return result
+
+
+def at_most_one(clauses, variables, n):
+    if len(variables) <= 1:
+        return
+
+    aux = generate_new_variables(n, len(variables))
+
+    # First input implies the first auxiliary variable
+    clauses.append([-variables[0], aux[0]])
+
+    for i in range(1, len(variables) - 1):
+        # If input i is true, auxiliary i must be true
+        clauses.append([-variables[i], aux[i]])
+
+        # Propagate the sequential counter
+        clauses.append([-aux[i - 1], aux[i]])
+
+        # Prevent two inputs from being true
+        clauses.append([-aux[i - 1], -variables[i]])
+
+    # The last input cannot be true if a previous one was true
+    clauses.append([-aux[-1], -variables[-1]])
+
+def exactly_one(clauses, variables, n):
     clauses.append(variables)
-    at_most_one(clauses, variables)
+    at_most_one(clauses, variables, n)
 
 
 def generate_clauses(n, variables):
@@ -34,70 +53,65 @@ def generate_clauses(n, variables):
 
     # Exactly one queen in each row
     for row in range(n):
-        exactly_one(clauses, variables[row])
+        exactly_one(clauses, variables[row], n)
 
     # Exactly one queen in each column
     for col in range(n):
-        exactly_one(clauses, [variables[row][col] for row in range(n)])
+        column = [variables[row][col] for row in range(n)]
+        exactly_one(clauses, column, n)
 
 
     # At most one queen in each diagonal
-    for i in range(1, n):
-        diagonal = []
-        row = i
-        col = 0
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, diagonal)
+    for diff in range(-(n - 1), n):
+        diagonal = [
+            variables[i][j]
+            for i in range(n)
+            for j in range(n)
+            if i - j == diff
+        ]
+        at_most_one(clauses, diagonal, n)
 
-    for j in range(1, n - 1):
-        diagonal = []
-        row = n - 1
-        col = j
-        while row >= 0 and col < n:
-            diagonal.append(variables[row][col])
-            row -= 1
-            col += 1
-        at_most_one(clauses, diagonal)
+    for total in range(2 * n - 1):
+        diagonal = [
+            variables[i][j]
+            for i in range(n)
+            for j in range(n)
+            if i + j == total
+        ]
+        at_most_one(clauses, diagonal, n)
 
-    for i in range(n - 1):
-        diagonal = []
-        row = i
-        col = 0
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, diagonal)
-
-    for j in range(1, n - 1):
-        diagonal = []
-        row = 0
-        col = j
-        while row < n and col < n:
-            diagonal.append(variables[row][col])
-            row += 1
-            col += 1
-        at_most_one(clauses, diagonal)
 
     return clauses
 
 
 def solve_n_queens(n):
+    global new_variables_count
+
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
+    new_variables_count = 0
+
     variables = generate_variables(n)
     clauses = generate_clauses(n, variables)
 
-    solver = Glucose3()
-    for clause in clauses:
-        solver.add_clause(clause)
+    with Glucose3(bootstrap_with=clauses) as solver:
+        if not solver.solve():
+            return None
 
-    if solver.solve():
         model = solver.get_model()
-        return [[int(model[i * n + j] > 0) for j in range(n)] for i in range(n)]
-    else:
-        return None
+
+    true_variables = {
+        literal for literal in model if literal > 0
+    }
+
+    return [
+        [
+            int(variables[i][j] in true_variables)
+            for j in range(n)
+        ]
+        for i in range(n)
+    ]
 
 
 def print_solution(solution):
@@ -107,8 +121,8 @@ def print_solution(solution):
         for row in solution:
             print(" ".join("Q" if cell else "." for cell in row))
 
-
-n = 64
-solution = solve_n_queens(n)
-print_solution(solution)
+if __name__ == "__main__":
+    n = int(input("Nhap N: "))
+    solution = solve_n_queens(n)
+    print_solution(solution)
 

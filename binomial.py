@@ -2,7 +2,10 @@ from pysat.solvers import Glucose3
 
 
 def generate_variables(n):
-    return [[i * n + j + 1 for j in range(n)] for i in range(n)]
+    return [
+        [i * n + j + 1 for j in range(n)] 
+        for i in range(n)
+    ]
 
 
 def at_most_one(clauses, variables):
@@ -20,16 +23,14 @@ def exactly_one(clauses, variables):
 def generate_clauses(n, variables):
     clauses = []
 
-    # Exactly one queen in each row
     for i in range(n):
         exactly_one(clauses, variables[i])
 
-    # Exactly one queen in each column
     for j in range(n):
-        exactly_one(clauses, [variables[i][j] for i in range(n)])
+        column = [variables[i][j] for i in range(n)]
+        exactly_one(clauses, column)
 
 
-    # At most one queen in each diagonal
     for i in range(n):
         for j in range(n):
             for k in range(1, n):
@@ -42,19 +43,30 @@ def generate_clauses(n, variables):
 
 
 def solve_n_queens(n):
+    if n < 1:
+        raise ValueError("n must be >= 1")
     variables = generate_variables(n)
     clauses = generate_clauses(n, variables)
-    print(clauses)
 
-    solver = Glucose3()
-    for clause in clauses:
-        solver.add_clause(clause)
+    with Glucose3(bootstrap_with=clauses) as solver:
+        if not solver.solve():
+            return None
 
-    if solver.solve():
         model = solver.get_model()
-        return [[int(model[i * n + j] > 0) for j in range(n)] for i in range(n)]
-    else:
-        return None
+
+    true_variables = {
+        literal for literal in model if literal > 0
+    }
+
+    solution = [
+        [
+            int(variables[i][j] in true_variables)
+            for j in range(n)
+        ]
+        for i in range(n)
+    ]
+
+    return solution
 
 
 def print_solution(solution):
@@ -66,7 +78,7 @@ def print_solution(solution):
             print(" ".join("Q" if cell else "." for cell in row))
 
 
-n = 8
-# print(generate_clauses(n, generate_variables(n)))
-solution = solve_n_queens(n)
-print_solution(solution)
+if __name__ == "__main__":
+    n = int(input("Nhap N: "))
+    solution = solve_n_queens(n)
+    print_solution(solution)
